@@ -1,3 +1,7 @@
+const readline = require('readline');
+const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+const ask = (query) => new Promise(resolve => rl.question(`${query} `, resolve));
+
 function shuffleDeck(unshuffled) {
   const shuffled = unshuffled
     .map(value => ({ value, sort: Math.random() }))
@@ -23,6 +27,7 @@ function initPlayer(el, i) {
     id: i,
     chips: 1000,
     dealer: false,
+    fold: false,
   }
 }
 
@@ -41,7 +46,6 @@ function postBlinds(players, dealerIndex, pot) {
     players[dealerIndex + 1].chips -= 2;
   }
   pot += 2;
-  console.log('players after blinds: ', players);
 }
 
 function dealHoleCards(players, shuffledDeck) {
@@ -53,7 +57,6 @@ function dealHoleCards(players, shuffledDeck) {
     }
     i++;
   }
-  console.log('players after hold cards: ', players);
 }
 
 function initializeRound(deck, players) {
@@ -75,27 +78,49 @@ function initializeRound(deck, players) {
   }
 
   const pot = 0;
-
-  // Big blinds = 2 chips, small blinds = 1 chip
-  console.log('players before blinds: ', players);
   postBlinds(players, dealerIndex, pot);
-
-  // deal hole cards
   dealHoleCards(players, shuffledDeck);
 
   return [shuffledDeck, pot];
 }
 
-export default function Home() {
+async function bet(players, action, pot, lastBet) {
+  const action = (await ask('Action?')).trim().toLowerCase() ?? 'call';
+  if (action === 'raise') lastBet = (await ask('Raise bet to?')).trim().toLowerCase() ?? lastBet;
+
+  for (const player of players) {
+    if (!player.fold) {
+      if (action === 'call') {
+        player.chips -= lastBet;
+        pot += lastBet;
+      } else if (action === 'raise') {
+        player.chips -= lastBet;
+        pot += lastBet;
+      } else if (action === 'fold') {
+        player.fold = true;
+        if (player.dealer) 
+        player.holdCards = [];
+      }
+    }
+  }
+
+  return lastBet;
+}
+
+export default async function Home() {
   const numberOfPlayers = 4; // TEMP
   const deckOfCards = createDeck();
   const players = createPlayers(numberOfPlayers);
 
   // initiate - shuffle deck, blinds, and dealer
-  // initializeRound(deckOfCards, players);
   const [shuffledDeck, pot] = initializeRound(deckOfCards, players);
-  console.log('shuffledDeck: ', shuffledDeck);
-  console.log('pot: ', pot);
+  // console.log('shuffledDeck: ', shuffledDeck);
+  // console.log('pot: ', pot);
+
+  // Pre-flop betting round
+  let lastBet = 2;
+  // act based on previous bet
+  lastBet = await bet(players, action, pot, lastBet);
 
   return '';
 }
