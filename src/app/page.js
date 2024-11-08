@@ -46,6 +46,8 @@ function postBlinds(players, dealerIndex, pot) {
     players[dealerIndex + 1].chips -= 2;
   }
   pot += 2;
+
+  return pot;
 }
 
 function dealHoleCards(players, shuffledDeck) {
@@ -57,6 +59,20 @@ function dealHoleCards(players, shuffledDeck) {
     }
     i++;
   }
+  console.log('Hole cards are dealt.');
+}
+
+function dealCommunityCards(numberOfCards, shuffledDeck, communityCards) {
+  let i = 0;
+  while (i < numberOfCards) {
+    const lastCard = shuffledDeck.shift();
+    communityCards.push(lastCard);
+    i++;
+  }
+}
+
+function sortPlayers (players) {
+  players.sort((a, b) => b.dealer - a.dealer);
 }
 
 function initializeRound(deck, players) {
@@ -77,50 +93,90 @@ function initializeRound(deck, players) {
     }
   }
 
-  const pot = 0;
-  postBlinds(players, dealerIndex, pot);
-  dealHoleCards(players, shuffledDeck);
+  sortPlayers(players);
 
+  let pot = 0;
+  pot = postBlinds(players, dealerIndex, pot);
+  console.log(`Pot: ${pot}`);
+  dealHoleCards(players, shuffledDeck);
+  players.forEach((player) => {
+    console.log(`Player ${player.id} got 2 hold cards: ${player.holeCards}`);
+  });
+  
   return [shuffledDeck, pot];
 }
 
-async function bet(players, action, pot, lastBet) {
-  const action = (await ask('Action?')).trim().toLowerCase() ?? 'call';
-  if (action === 'raise') lastBet = (await ask('Raise bet to?')).trim().toLowerCase() ?? lastBet;
+async function bet(players, pot, lastBet = 2) {
+  sortPlayers(players);
 
   for (const player of players) {
+    const action = (await ask(`Action for player ${player.id}?`)).trim().toLowerCase() || 'call';
+    console.log('action: ', action);
+    if (action === 'raise') {
+      let ans;
+      do {
+        ans = Number(await ask(`Raise bet to? (must be above previous bet ${lastBet}): `)) || 0;
+      } while (ans <= lastBet);
+      lastBet = ans;
+    }
+
     if (!player.fold) {
-      if (action === 'call') {
+      if (['raise', 'call'].includes(action)) {
         player.chips -= lastBet;
         pot += lastBet;
-      } else if (action === 'raise') {
-        player.chips -= lastBet;
-        pot += lastBet;
+        console.log(`Pot: ${pot}`);
       } else if (action === 'fold') {
         player.fold = true;
-        if (player.dealer) 
         player.holdCards = [];
+        if (player.dealer) {
+          let newDealerIndex;
+          if (player.id === players.length - 1) newDealerIndex = 0;
+          else newDealerIndex = player.id + 1; 
+          players[newDealerIndex].dealer = true;
+          player.dealer = false;
+        }
       }
     }
   }
 
-  return lastBet;
+  return [pot, lastBet];
 }
 
-export default async function Home() {
+// export default async function Home() {
+async function Home() {
   const numberOfPlayers = 4; // TEMP
   const deckOfCards = createDeck();
   const players = createPlayers(numberOfPlayers);
 
   // initiate - shuffle deck, blinds, and dealer
-  const [shuffledDeck, pot] = initializeRound(deckOfCards, players);
-  // console.log('shuffledDeck: ', shuffledDeck);
-  // console.log('pot: ', pot);
+  let [shuffledDeck, pot] = initializeRound(deckOfCards, players);
 
   // Pre-flop betting round
-  let lastBet = 2;
-  // act based on previous bet
-  lastBet = await bet(players, action, pot, lastBet);
+  let lastBet;
+  if (players.length !== 2) {
+    const playersToBet = players.slice(2);
+    [pot, lastBet] = await bet(playersToBet, pot);
+  }
 
-  return '';
+  // Flop, Turn, River rounds
+  const numberOfCCForEachRound = [3, 1, 1];
+  const communityCards = [];
+  for (const number of numberOfCCForEachRound) {
+    // Deal community cards
+    dealCommunityCards(number, shuffledDeck, communityCards);
+    console.log('communityCards: ', communityCards);
+
+    // Bet - only if there're more than 1 active players
+    if (players.filter((p) => !p.fold).length > 1) {
+      [pot, lastBet] = await bet(players, pot, lastBet);
+    } else {
+      break;
+    }
+
+    console.log(`Pot: ${pot}`);
+  }
+
+  // return '';
 }
+
+Home();
