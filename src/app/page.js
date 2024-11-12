@@ -31,6 +31,7 @@ const initPlayer = (el, i) => ({
   chips: 1000,
   dealer: false,
   hasFolded: false,
+  hasAllIn: false,
   currentBet: 0,
 })
 
@@ -104,18 +105,32 @@ function initializeRound(deck, players) {
   dealHoleCards(players, roundState.deck);
   players.forEach((player) => {
     player.hasFolded = false;
+    player.hasAllIn = false;
     console.log(`Player ${player.id} got 2 hold cards: ${player.holeCards}`);
   });
   
   return roundState;
 }
 
-async function askPlayerAction(player) {
-  let action = (await ask(`Action for player ${player.id}?`)).trim().toLowerCase() || 'call';
-  while (action !== 'call' && action !== 'raise' && action !== 'check' && action !== 'fold') {
-    action = (await ask(`Invalid action. Please enter call, raise, check, or fold.`)).trim().toLowerCase();
+// first to act = small blind
+function initialseBettingRound(players, roundState) {
+  roundState.currentBet = 0;
+  for (const player of players) {
+    player.currentBet = 0;
   }
-  return action;
+};
+
+async function askPlayerAction(player, someoneHasBetted) {
+  let action = (await ask(`Action for player ${player.id}?`)).trim().toLowerCase() || 'call';
+  while (['call', 'raise', 'check', 'fold'].includes(action)) {
+    action = (await ask(`Invalid action. Please enter call, raise, check, or fold.`)).trim().toLowerCase();
+    while (action === 'check' && someoneHasBetted) {
+      action = (await ask(`Invalid action. Someone has made bet, please enter call, raise, or fold.`)).trim().toLowerCase();
+    }
+    if (['call', 'raise'].includes(action)) someoneHasBetted = true;
+  }
+
+  return [action, someoneHasBetted];
 } 
 
 async function askRaiseAmount(player, currentBet) {
@@ -127,8 +142,11 @@ async function askRaiseAmount(player, currentBet) {
 }
 
 async function handlePlayerAction(players, roundState) {
+  let someoneHasBetted = false;
+  let action;
+
   for (const player of players) {
-    const action = await askPlayerAction(player);
+    [action, someoneHasBetted] = await askPlayerAction(player, someoneHasBetted);
     switch(action) {
       case 'call':
         if (player.chips > roundState.currentBet) placeBet(player, roundState.currentBet - player.currentBet, roundState);
@@ -147,14 +165,6 @@ async function handlePlayerAction(players, roundState) {
   }
 }
 
-// first to act = small blind
-function initialseBettingRound(players, roundState) {
-  roundState.currentBet = 0;
-  for (const player of players) {
-    player.currentBet = 0; s
-  }
-};
-
 async function handleBettingRound(players, roundState) {
   // ends either when everyone but 1 person has folded or everyone who hasnt folded has called
   // roundState.currentBet = 4
@@ -164,7 +174,7 @@ async function handleBettingRound(players, roundState) {
     players.filter(p => !p.hasFolded).length > 1
   ) {
     for (const player of player) {
-      if (player.currentBet < roundState.currentBet) {
+      if (!player.hasAllIn) {
         const action = handlePlayerAction(player, roundState); // call, raise, fold, check
       }
     }
@@ -190,23 +200,13 @@ async function Home() {
         dealCommunityCards(number, roundState.deck, roundState.communityCards);
         console.log('communityCards: ', roundState.communityCards);
         handleBettingRound(players, pot, lastBet);
-        if (roundState.players.length > 1) continue
+        if (roundState.players.length > 1) continue;
         else break;
-        // // Bet - only if there're more than 1 active players
-        // if (players.filter((p) => !p.fold).length > 1) {
-        //   [pot, roundState.currentBet] = await bet(players, pot, roundState.currentBet);
-        // } else {
-        //   break;
-        // }
-    
-        console.log(`Pot: ${pot}`);
       }
     }
 
-    players = players.filter(p => p.chips)
+    players = players.filter(p => p.chips);
   }
-
-  // return '';
 }
 
 Home();
