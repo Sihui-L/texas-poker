@@ -2,6 +2,16 @@ const readline = require('readline');
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 const ask = (query) => new Promise(resolve => rl.question(`${query} `, resolve));
 
+async function askBoolean(question, defaultAns = false) {
+  const inputAnswer = (await ask(`${question} [yes|no]`)).trim().toLowerCase();
+
+  const answer = inputAnswer === 'yes' || inputAnswer === 'no'
+    ? inputAnswer === 'yes'
+    : defaultAns;
+
+  return answer;
+}
+
 const UNIT = 1;
 const SMALL_BLIND = 1 * UNIT;
 const BIG_BLIND = 2 * UNIT;
@@ -34,6 +44,7 @@ const initPlayer = (el, i) => ({
   hasAllIn: false,
   currentBet: 0,
 })
+// TODO: make Player a class, and add method "makeBet" to it
 
 function createPlayers(numberOfPlayers) {
   return Array(numberOfPlayers).fill('').map(initPlayer);
@@ -50,10 +61,11 @@ function placeBet(player, amount, roundState) {
 }
 
 function postBlinds(players, roundState) {
-  // dealer posts small blind
+  // The person to the left of the dealer posts small blind
   const { dealerIndex } = roundState;
   const smallBlindIndex = dealerIndex === players.length - 1 ? 0 : dealerIndex + 1;
-  const bigBlindIndex = dealerIndex === players.length - 2 ? 0 : dealerIndex + 2;
+  const bigBlindIndex = dealerIndex === players.length - 2 ? (dealerIndex === players.length - 1 ? 1 : 0) : dealerIndex + 2;
+
   placeBet(players[smallBlindIndex], SMALL_BLIND, roundState);
   placeBet(players[bigBlindIndex], BIG_BLIND, roundState);
 }
@@ -122,11 +134,11 @@ function initialseBettingRound(players, roundState) {
 
 async function askPlayerAction(player, someoneHasBetted) {
   let action = (await ask(`Action for player ${player.id}?`)).trim().toLowerCase() || 'call';
-  while (['call', 'raise', 'check', 'fold'].includes(action)) {
+  while (!['call', 'raise', 'check', 'fold'].includes(action)) {
     action = (await ask(`Invalid action. Please enter call, raise, check, or fold.`)).trim().toLowerCase();
-    while (action === 'check' && someoneHasBetted) {
-      action = (await ask(`Invalid action. Someone has made bet, please enter call, raise, or fold.`)).trim().toLowerCase();
-    }
+  }
+  while (action === 'check' && someoneHasBetted) {
+    action = (await ask(`Invalid action. Someone has made bet, please enter call, raise, or fold.`)).trim().toLowerCase();
     if (['call', 'raise'].includes(action)) someoneHasBetted = true;
   }
 
@@ -134,34 +146,34 @@ async function askPlayerAction(player, someoneHasBetted) {
 } 
 
 async function askRaiseAmount(player, currentBet) {
-  let amount = parseFloat(await ask(`Raise player ${player.id}'s bet to?`));
+  let amount = parseFloat(await ask(`Raise player ${player.id}'s bet to?`)).trim().toLowerCase();
   while (isNaN(amount) || amount < currentBet || amount > player.chips) {
-    amount = Number(await ask(`Invalid amount. Please enter an amount that's greater than current bet ${currentBet} and that you can afford.`));
+    amount = Number(await ask(`Invalid amount. Please enter an amount that's greater than current bet ${currentBet} and that you can afford.`)).trim().toLowerCase();
   }
   return amount;
 }
 
-async function handlePlayerAction(players, roundState) {
-  let someoneHasBetted = false;
+async function handlePlayerAction(player, roundState, someoneHasBetted) {
   let action;
 
-  for (const player of players) {
-    [action, someoneHasBetted] = await askPlayerAction(player, someoneHasBetted);
-    switch(action) {
-      case 'call':
-        if (player.chips > roundState.currentBet) placeBet(player, roundState.currentBet - player.currentBet, roundState);
-        break;
-      case 'raise':
-        const raiseAmount = await askRaiseAmount(player, roundState.currentBet);
-        placeBet(player, raiseAmount - player.currentBet, roundState);
-        break;
-      case 'check':
-
-        break;
-      case 'fold':
-        player.hasFolded = true;
-        break;
-    }
+  [action, someoneHasBetted] = await askPlayerAction(player, someoneHasBetted);
+  switch(action) {
+    case 'call':
+      if (player.chips > roundState.currentBet) placeBet(player, roundState.currentBet - player.currentBet, roundState);
+      else {
+        const ans = await askBoolean('The amount of chips you have is less than current bet, do you want to all in?');
+        // if ans = all-in
+      }
+      break;
+    case 'raise':
+      const raiseAmount = await askRaiseAmount(player, roundState.currentBet);
+      placeBet(player, raiseAmount - player.currentBet, roundState);
+      break;
+    case 'check':
+      break;
+    case 'fold':
+      player.hasFolded = true;
+      break;
   }
 }
 
@@ -169,13 +181,14 @@ async function handleBettingRound(players, roundState) {
   // ends either when everyone but 1 person has folded or everyone who hasnt folded has called
   // roundState.currentBet = 4
   // players = [ {id: 1, currentBet: 3}, {id: 2, currentBet: 3}, {id: 3, currentBet: 3 } ]
+  let someoneHasBetted = false; //WIP
   while (
     !players.filter(p => !p.hasFolded).every(p => p.currentBet === roundState.currentBet) &&
     players.filter(p => !p.hasFolded).length > 1
   ) {
-    for (const player of player) {
+    for (const player of players) {
       if (!player.hasAllIn) {
-        const action = handlePlayerAction(player, roundState); // call, raise, fold, check
+        const action = await handlePlayerAction(player, roundState); // call, raise, fold, check
       }
     }
   }
@@ -191,7 +204,7 @@ async function Home() {
     // initiate - shuffle deck, blinds, and dealer
     const roundState = initializeRound(deckOfCards, players);
     // Pre-flop betting round
-    handleBettingRound(players, pot, lastBet);
+    await handleBettingRound(players, roundState);
     if (roundState.players.length > 1) {
       // Flop, Turn, River rounds
       const numberOfCCForEachRound = [3, 1, 1];
@@ -199,7 +212,8 @@ async function Home() {
         initialseBettingRound(players, roundState);
         dealCommunityCards(number, roundState.deck, roundState.communityCards);
         console.log('communityCards: ', roundState.communityCards);
-        handleBettingRound(players, pot, lastBet);
+
+        await handleBettingRound(players, roundState);
         if (roundState.players.length > 1) continue;
         else break;
       }
